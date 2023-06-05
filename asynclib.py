@@ -29,20 +29,45 @@ class Task:
         yield self
         return self.return_val
 
+@dataclass
+class Event:
+    flag: bool = False
+    waiters: list[Task] = field(default_factory=list)
+
+    def __await__(self):
+        if not self.flag:
+            yield self
+        return True
+
+    async def wait(self):
+        await self
+
+    def set(self):
+        self.flag = True
+        for waiter in self.waiters:
+            jobs.put(waiter)
+        self.waiters = []
+
+    def clear(self):
+        self.flag = False
+
+    def is_set(self):
+        return self.flag
+
 def create_task(coro):
     task = Task(coro, time=0)
     jobs.put(task)
     return task
 
 @dataclass
-class EventSleep:
+class Sleep:
     time: float
 
     def __await__(self):
         yield self
 
 def sleep(delay):
-    return EventSleep(delay)
+    return Sleep(delay)
 
 async def gather(*coros):
     gather_jobs = [create_task(c) for c in coros]
@@ -76,10 +101,12 @@ def run(coro):
 
             continue
 
-        if isinstance(command, EventSleep):
+        if isinstance(command, Sleep):
             job.time = time.time() + command.time
             jobs.put(job)
         elif isinstance(command, Task):
             command.dependents.append(job)
+        elif isinstance(command, Event):
+            command.waiters.append(job)
         else:
             raise RuntimeError(f"Coroutine yielded unknown type: {type(command)}")
