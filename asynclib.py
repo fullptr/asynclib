@@ -8,32 +8,22 @@ import time
 # direct access to the event loop.
 jobs = []
 
-class Event:
-    """
-    Base class for awaitable objects in asynclib, objects yielded back to
-    the event loop must inherit from this class.
-
-    Currently, the logic for handling event types is hardcoded into the loop,
-    so users cannot create their own derives classes because the loop won't
-    know how to handle them. Maybe this will change in the future.
-
-    For now, all this class does is implement __await__ by yielding itself back
-    to the event loop so that it can be handled there.
-    """
-    def __await__(self):
-        yield self
-
 @dataclass
-class Task(Event):
+class Task:
     coro: Any
     time: float
 
     dependents: list["Task"] = field(default_factory=list)
+    return_val: Any = None
 
     def close(self):
         self.coro.close()
         for d in self.dependents:
             d.coro.close()
+
+    def __await__(self):
+        yield self
+        return self.return_val
 
 def create_task(coro):
     task = Task(coro, time=0)
@@ -41,11 +31,18 @@ def create_task(coro):
     return task
 
 @dataclass
-class EventSleep(Event):
+class EventSleep:
     time: float
+
+    def __await__(self):
+        yield self
 
 def sleep(delay):
     return EventSleep(delay)
+
+async def gather(*coros):
+    gather_jobs = [create_task(c) for c in coros]
+    return [await j for j in gather_jobs]
 
 def run(coro, *, wait_for_all=False):
     """
@@ -77,6 +74,7 @@ def run(coro, *, wait_for_all=False):
         try:
             command = job.coro.send(None)
         except StopIteration as e:
+            job.return_val = e.value
             if job.dependents:
                 jobs.extend(job.dependents)
 
