@@ -48,23 +48,13 @@ async def gather(*coros):
     gather_jobs = [create_task(c) for c in coros]
     return [await j for j in gather_jobs]
 
-def run(coro, *, wait_for_all=False):
+def run(coro):
     """
-
     :param coro:
         The main coroutine to run
-    :param wait_for_all:
-        If true, the event loop will run until every task has completed,
-        even if the main coroutine finishes. The return value of the main
-        coroutine is stored and returned at the end.
     :return:
         The return value of 'coro'
     """
-    global jobs
-
-    ret = None
-    orig = coro
-
     jobs.put(Task(coro, time=0))
 
     while not jobs.empty():
@@ -78,14 +68,12 @@ def run(coro, *, wait_for_all=False):
             for dep in job.dependents:
                 jobs.put(dep)
 
-            if job.coro is not orig:
-                continue
-
-            ret = e.value
-            if not wait_for_all: # cancel all remaining jobs and return
+            # If this is the main job, cancel all remaining jobs and return
+            if job.coro is coro:
                 while not jobs.empty():
                     jobs.get().close()
-                return ret
+                return job.return_val
+
             continue
 
         if isinstance(command, EventSleep):
@@ -95,5 +83,3 @@ def run(coro, *, wait_for_all=False):
             command.dependents.append(job)
         else:
             raise RuntimeError(f"Coroutine yielded unknown type: {type(command)}")
-
-    return ret

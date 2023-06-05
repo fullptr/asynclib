@@ -21,6 +21,7 @@ async def main():
 
 async def inner():
     return 42
+
 async def outer():
     x = await inner()
     print(x)
