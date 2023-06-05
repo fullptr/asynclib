@@ -16,6 +16,7 @@ async def main():
         factorial("B", 3),
         factorial("C", 4),
     )
+
     return L
 
 async def inner():
@@ -25,8 +26,5 @@ async def outer():
     print(x)
     return x
 
-o = outer()
-try:
-    print(o.send(None))
-except StopIteration:
-    pass
+ret = asynclib.run(main())
+print(ret)
