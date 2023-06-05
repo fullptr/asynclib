@@ -3,11 +3,19 @@ from typing import Any
 from queue import PriorityQueue
 import time
 
-# This will eventually evolve into a data structure that encapsulates an
-# event loop. This is global so that coroutines can schedule other tasks via
-# asynclib.create_task similar to asyncio. Other features will also require
-# direct access to the event loop.
-jobs = PriorityQueue()
+@dataclass
+class Loop:
+    """
+    Holds all the global state for the running event loop. In the future,
+    support multiple event loops.
+    """
+    jobs: PriorityQueue = field(default_factory=PriorityQueue)
+
+loop = Loop()
+
+def get_running_loop():
+    global loop
+    return loop
 
 @dataclass
 class Task:
@@ -45,7 +53,7 @@ class Event:
     def set(self):
         self.flag = True
         for waiter in self.waiters:
-            jobs.put(waiter)
+            loop.jobs.put(waiter)
         self.waiters = []
 
     def clear(self):
@@ -56,7 +64,7 @@ class Event:
 
 def create_task(coro):
     task = Task(coro, time=0)
-    jobs.put(task)
+    loop.jobs.put(task)
     return task
 
 @dataclass
@@ -80,10 +88,10 @@ def run(coro):
     :return:
         The return value of 'coro'
     """
-    jobs.put(Task(coro, time=0))
+    loop.jobs.put(Task(coro, time=0))
 
-    while not jobs.empty():
-        job = jobs.get()
+    while not loop.jobs.empty():
+        job = loop.jobs.get()
         time.sleep(max(0.0, job.time - time.time()))
 
         try:
@@ -91,19 +99,19 @@ def run(coro):
         except StopIteration as e:
             job.return_val = e.value
             for dep in job.dependents:
-                jobs.put(dep)
+                loop.jobs.put(dep)
 
             # If this is the main job, cancel all remaining jobs and return
             if job.coro is coro:
-                while not jobs.empty():
-                    jobs.get().close()
+                while not loop.jobs.empty():
+                    loop.jobs.get().close()
                 return job.return_val
 
             continue
 
         if isinstance(command, Sleep):
             job.time = time.time() + command.time
-            jobs.put(job)
+            loop.jobs.put(job)
         elif isinstance(command, Task):
             command.dependents.append(job)
         elif isinstance(command, Event):
