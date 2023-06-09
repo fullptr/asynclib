@@ -24,6 +24,7 @@ class Task:
 
     dependents: list["Task"] = field(default_factory=list)
     return_val: Any = None
+    complete: bool = False
 
     def close(self):
         self.coro.close()
@@ -95,8 +96,9 @@ def run(coro):
         time.sleep(max(0.0, job.time - time.time()))
 
         try:
-            command = job.coro.send(None)
+            event = job.coro.send(None)
         except StopIteration as e:
+            job.complete = True
             job.return_val = e.value
             for dep in job.dependents:
                 loop.jobs.put(dep)
@@ -109,12 +111,15 @@ def run(coro):
 
             continue
 
-        if isinstance(command, Sleep):
-            job.time = time.time() + command.time
+        if isinstance(event, Sleep):
+            job.time = time.time() + event.time
             loop.jobs.put(job)
-        elif isinstance(command, Task):
-            command.dependents.append(job)
-        elif isinstance(command, Event):
-            command.waiters.append(job)
+        elif isinstance(event, Task):
+            if event.complete:
+                loop.jobs.put(job)
+            else:
+                event.dependents.append(job)
+        elif isinstance(event, Event):
+            event.waiters.append(job)
         else:
-            raise RuntimeError(f"Coroutine yielded unknown type: {type(command)}")
+            raise RuntimeError(f"Coroutine yielded unknown type: {type(event)}")
